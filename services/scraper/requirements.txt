@@ -3,3 +3,8 @@ uvicorn[standard]
 pydantic
 httpx
 selectolax
+playwright
+pypdf
+python-multipart
+celery
+redis
