@@ -51,6 +51,46 @@ CREATE TABLE IF NOT EXISTS investigations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS source_registry (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+  source_id TEXT NOT NULL,
+  source_name TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  base_url TEXT,
+  jurisdiction TEXT,
+  access_method TEXT NOT NULL DEFAULT 'HTTP',
+  authorization_required BOOLEAN NOT NULL DEFAULT TRUE,
+  public_access_allowed BOOLEAN NOT NULL DEFAULT FALSE,
+  allowed_domains JSONB NOT NULL DEFAULT '[]'::jsonb,
+  allowed_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  rate_limit_per_minute INTEGER NOT NULL DEFAULT 30,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  terms_reference TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (organization_id, source_id)
+);
+
+CREATE TABLE IF NOT EXISTS scraper_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  investigation_id UUID NOT NULL REFERENCES investigations(id) ON DELETE CASCADE,
+  source_registry_id UUID REFERENCES source_registry(id),
+  job_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  priority TEXT NOT NULL DEFAULT 'NORMAL',
+  requested_url TEXT,
+  requested_fields JSONB NOT NULL DEFAULT '[]'::jsonb,
+  result_count INTEGER NOT NULL DEFAULT 0,
+  error_code TEXT,
+  error_message TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS addresses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
@@ -75,6 +115,7 @@ CREATE TABLE IF NOT EXISTS evidence (
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
   investigation_id UUID REFERENCES investigations(id) ON DELETE CASCADE,
+  scraper_job_id UUID REFERENCES scraper_jobs(id) ON DELETE SET NULL,
   source_name TEXT NOT NULL,
   source_type TEXT NOT NULL,
   source_reference TEXT,
@@ -88,6 +129,8 @@ CREATE TABLE IF NOT EXISTS evidence (
   verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
   confidence NUMERIC(5,2),
   content_hash TEXT,
+  extraction_method TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -104,5 +147,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_cases_org_status ON cases(organization_id, status);
 CREATE INDEX IF NOT EXISTS idx_investigations_case ON investigations(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_source_registry_org ON source_registry(organization_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_scraper_jobs_investigation ON scraper_jobs(investigation_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence(case_id, retrieved_at DESC);
+CREATE INDEX IF NOT EXISTS idx_evidence_investigation ON evidence(investigation_id, retrieved_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_case ON audit_logs(case_id, created_at DESC);
