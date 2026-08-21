@@ -18,7 +18,23 @@ engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def persist_evidence(session: AsyncSession, job: ScraperJob, case: Case, result: dict) -> int:
+def parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+async def persist_evidence(
+    session: AsyncSession,
+    job: ScraperJob,
+    source: SourceRegistry,
+    case: Case,
+    result: dict,
+) -> int:
     content_hash = result.get("content_hash")
     if not content_hash:
         return 0
@@ -39,8 +55,9 @@ async def persist_evidence(session: AsyncSession, job: ScraperJob, case: Case, r
         "provenance": result.get("provenance") or {},
         "title": result.get("title"),
     }
-
+    observed_at = parse_timestamp(result.get("retrieved_at"))
     created = 0
+
     for field_name, value in extracted.items():
         if value is None:
             continue
@@ -50,15 +67,15 @@ async def persist_evidence(session: AsyncSession, job: ScraperJob, case: Case, r
                 case_id=case.id,
                 investigation_id=job.investigation_id,
                 scraper_job_id=job.id,
-                source_name=job.source_registry_id and str(job.source_registry_id) or "unknown",
-                source_type="PUBLIC_WEB",
+                source_name=source.source_name,
+                source_type=source.source_type,
                 source_reference=result.get("evidence_id"),
                 source_url=result.get("source_url"),
                 entity_type="UNKNOWN",
                 field_name=field_name,
                 raw_value=str(value),
                 normalized_value=str(value),
-                observed_at=result.get("retrieved_at"),
+                observed_at=observed_at,
                 verification_status=result.get("verification_status", "UNVERIFIED"),
                 confidence=None,
                 content_hash=content_hash,
@@ -75,15 +92,17 @@ async def persist_evidence(session: AsyncSession, job: ScraperJob, case: Case, r
                 case_id=case.id,
                 investigation_id=job.investigation_id,
                 scraper_job_id=job.id,
-                source_name=str(job.source_registry_id),
-                source_type="PUBLIC_WEB",
+                source_name=source.source_name,
+                source_type=source.source_type,
                 source_reference=result.get("evidence_id"),
                 source_url=result.get("source_url"),
                 entity_type="DOCUMENT",
                 field_name="document",
-                raw_value=result.get("text", "")[:200000],
+                raw_value=(result.get("text") or "")[:200000],
                 normalized_value=None,
+                observed_at=observed_at,
                 verification_status=result.get("verification_status", "UNVERIFIED"),
+                confidence=None,
                 content_hash=content_hash,
                 extraction_method=result.get("extraction_method"),
                 metadata=metadata,
@@ -146,7 +165,7 @@ async def process_one(session: AsyncSession, job: ScraperJob) -> dict:
             response = await client.post(f"{SCRAPER_URL}/v2/fetch", json=payload)
             response.raise_for_status()
         result = response.json()
-        created = await persist_evidence(session, job, case, result)
+        created = await persist_evidence(session, job, source, case, result)
         job.status = "COMPLETED"
         job.result_count = created
         job.completed_at = datetime.now(timezone.utc)
