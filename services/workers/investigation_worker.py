@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from uuid import UUID
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from services.api.app.models import Investigation, ScraperJob, SourceRegistry
+from services.api.app.models import Case, Investigation, ScraperJob, SourceRegistry
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -27,10 +26,23 @@ async def process_one(session: AsyncSession, job: ScraperJob) -> dict:
         return {"status": job.status, "job_id": str(job.id)}
 
     source = await session.scalar(select(SourceRegistry).where(SourceRegistry.id == job.source_registry_id))
+    investigation = await session.scalar(select(Investigation).where(Investigation.id == job.investigation_id))
     if not source or not source.enabled:
         job.status = "FAILED"
         job.error_code = "SOURCE_DISABLED"
         job.error_message = "Source is unavailable or disabled"
+        return {"status": job.status, "job_id": str(job.id)}
+    if not investigation:
+        job.status = "FAILED"
+        job.error_code = "INVESTIGATION_NOT_FOUND"
+        job.error_message = "Investigation no longer exists"
+        return {"status": job.status, "job_id": str(job.id)}
+
+    case = await session.scalar(select(Case).where(Case.id == investigation.case_id))
+    if not case:
+        job.status = "FAILED"
+        job.error_code = "CASE_NOT_FOUND"
+        job.error_message = "Case no longer exists"
         return {"status": job.status, "job_id": str(job.id)}
 
     job.status = "RUNNING"
@@ -39,7 +51,7 @@ async def process_one(session: AsyncSession, job: ScraperJob) -> dict:
     await session.flush()
 
     payload = {
-        "case_id": "pending",
+        "case_id": str(case.id),
         "investigation_id": str(job.investigation_id),
         "source": {
             "source_id": source.source_id,
