@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -11,10 +11,12 @@ from .db import engine, get_db
 from .models import AuditLog, Base, Case, Evidence, Investigation, Organization, ScraperJob, SourceRegistry, User
 from .source_registry_api import router as source_registry_router
 from .v3_records_api import router as v3_records_router
+from .v3_routes import router as v3_intelligence_router
 
-app = FastAPI(title="Recovery Intelligence API", version="0.4.0")
+app = FastAPI(title="Recovery Intelligence API", version="0.5.0")
 app.include_router(source_registry_router)
 app.include_router(v3_records_router)
+app.include_router(v3_intelligence_router)
 
 
 class HealthResponse(BaseModel):
@@ -118,7 +120,7 @@ async def startup() -> None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", version="0.4.0")
+    return HealthResponse(status="ok", version="0.5.0")
 
 
 @app.post("/api/v1/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -129,13 +131,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     org = Organization(name=payload.organization_name, slug=payload.organization_slug)
     db.add(org)
     await db.flush()
-    user = User(
-        organization_id=org.id,
-        email=payload.email,
-        full_name=payload.full_name,
-        password_hash=hash_password(payload.password),
-        role="organization_admin",
-    )
+    user = User(organization_id=org.id, email=payload.email, full_name=payload.full_name, password_hash=hash_password(payload.password), role="organization_admin")
     db.add(user)
     await db.flush()
     db.add(AuditLog(organization_id=org.id, user_id=user.id, action="REGISTER"))
