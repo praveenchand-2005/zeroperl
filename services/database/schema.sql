@@ -134,14 +134,43 @@ CREATE TABLE IF NOT EXISTS evidence (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS audit_logs (
+CREATE TABLE IF NOT EXISTS evidence_nodes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  user_id UUID REFERENCES users(id),
-  case_id UUID REFERENCES cases(id),
-  action TEXT NOT NULL,
-  reason TEXT,
+  case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
+  node_type TEXT NOT NULL,
+  label TEXT NOT NULL,
+  external_key TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS evidence_edges (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
+  source_node_id UUID NOT NULL REFERENCES evidence_nodes(id) ON DELETE CASCADE,
+  target_node_id UUID NOT NULL REFERENCES evidence_nodes(id) ON DELETE CASCADE,
+  relationship TEXT NOT NULL,
+  evidence_id UUID REFERENCES evidence(id) ON DELETE SET NULL,
+  confidence NUMERIC(5,2),
+  observed_at TIMESTAMPTZ,
+  verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS review_queue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
+  investigation_id UUID REFERENCES investigations(id) ON DELETE CASCADE,
+  review_type TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  reason TEXT NOT NULL,
+  payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+  assigned_user_id UUID REFERENCES users(id),
+  resolution TEXT,
+  resolved_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -151,4 +180,11 @@ CREATE INDEX IF NOT EXISTS idx_source_registry_org ON source_registry(organizati
 CREATE INDEX IF NOT EXISTS idx_scraper_jobs_investigation ON scraper_jobs(investigation_id, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence(case_id, retrieved_at DESC);
 CREATE INDEX IF NOT EXISTS idx_evidence_investigation ON evidence(investigation_id, retrieved_at DESC);
+CREATE INDEX IF NOT EXISTS idx_graph_nodes_case ON evidence_nodes(case_id, node_type);
+CREATE INDEX IF NOT EXISTS idx_graph_edges_case ON evidence_edges(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_review_queue_org_status ON review_queue(organization_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_case ON audit_logs(case_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_evidence_content_hash
+  ON evidence(organization_id, case_id, content_hash)
+  WHERE content_hash IS NOT NULL;
