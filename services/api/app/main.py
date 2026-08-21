@@ -3,14 +3,14 @@ from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .db import engine, get_db
-from .models import AuditLog, Base, Case, Organization, User
+from .models import AuditLog, Base, Case, Investigation, Organization, ScraperJob, User
 
-app = FastAPI(title="Recovery Intelligence API", version="0.2.0")
+app = FastAPI(title="Recovery Intelligence API", version="0.3.0")
 
 
 class HealthResponse(BaseModel):
@@ -48,7 +48,6 @@ class CaseCreate(BaseModel):
 
 class CaseResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: UUID
     case_number: str
     borrower_name: str
@@ -62,7 +61,8 @@ class CaseResponse(BaseModel):
 class InvestigationRequest(BaseModel):
     case_id: str
     depth: str = "STANDARD"
-    fields: list[str] = []
+    fields: list[str] = Field(default_factory=list)
+    urls: list[str] = Field(default_factory=list)
 
 
 @app.on_event("startup")
@@ -73,7 +73,7 @@ async def startup() -> None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", version="0.2.0")
+    return HealthResponse(status="ok", version="0.3.0")
 
 
 @app.post("/api/v1/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -81,11 +81,9 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     existing = await db.scalar(select(User).where(User.email == payload.email))
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
-
     org = Organization(name=payload.organization_name, slug=payload.organization_slug)
     db.add(org)
     await db.flush()
-
     user = User(
         organization_id=org.id,
         email=payload.email,
@@ -95,7 +93,6 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
     )
     db.add(user)
     await db.flush()
-
     db.add(AuditLog(organization_id=org.id, user_id=user.id, action="REGISTER"))
     await db.commit()
     return TokenResponse(access_token=create_access_token(user.id, org.id, user.role))
@@ -123,13 +120,8 @@ async def me(user: User = Depends(get_current_user)) -> dict:
 
 
 @app.get("/api/v1/cases", response_model=list[CaseResponse])
-async def list_cases(
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> list[CaseResponse]:
-    result = await db.scalars(
-        select(Case).where(Case.organization_id == user.organization_id).order_by(Case.created_at.desc())
-    )
+async def list_cases(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[CaseResponse]:
+    result = await db.scalars(select(Case).where(Case.organization_id == user.organization_id).order_by(Case.created_at.desc()))
     return list(result.all())
 
 
@@ -139,7 +131,7 @@ async def create_case(
     user: User = Depends(require_roles("organization_admin", "recovery_manager")),
     db: AsyncSession = Depends(get_db),
 ) -> CaseResponse:
-    duplicate = await db.scalar(select(Case).where(Case.case_number == payload.case_number))
+    duplicate = await db.scalar(select(Case).where(Case.organization_id == user.organization_id, Case.case_number == payload.case_number))
     if duplicate:
         raise HTTPException(status_code=409, detail="Case number already exists")
     case = Case(
@@ -171,27 +163,81 @@ async def create_investigation(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid case_id") from exc
 
-    case = await db.scalar(
-        select(Case).where(Case.id == case_id, Case.organization_id == user.organization_id)
-    )
+    case = await db.scalar(select(Case).where(Case.id == case_id, Case.organization_id == user.organization_id))
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    investigation_id = f"INV-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-    db.add(
-        AuditLog(
-            organization_id=user.organization_id,
-            user_id=user.id,
-            case_id=case.id,
-            action="INVESTIGATION_QUEUED",
-            details=f"depth={request.depth};fields={','.join(request.fields)}",
-        )
+    investigation = Investigation(
+        organization_id=user.organization_id,
+        case_id=case.id,
+        requested_by=user.id,
+        depth=request.depth,
+        status="QUEUED",
     )
+    db.add(investigation)
+    await db.flush()
+
+    for url in request.urls:
+        db.add(
+            ScraperJob(
+                organization_id=user.organization_id,
+                investigation_id=investigation.id,
+                job_type="PUBLIC_FETCH",
+                status="QUEUED",
+                requested_url=url,
+                requested_fields=request.fields,
+            )
+        )
+
+    db.add(AuditLog(
+        organization_id=user.organization_id,
+        user_id=user.id,
+        case_id=case.id,
+        action="INVESTIGATION_QUEUED",
+        details=f"investigation={investigation.id};depth={request.depth};jobs={len(request.urls)}",
+    ))
     await db.commit()
     return {
-        "investigation_id": investigation_id,
+        "investigation_id": str(investigation.id),
         "case_id": str(case.id),
         "depth": request.depth,
         "fields": request.fields,
+        "job_count": len(request.urls),
         "status": "QUEUED",
+    }
+
+
+@app.get("/api/v3/investigations/{investigation_id}")
+async def investigation_progress(
+    investigation_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        inv_id = UUID(investigation_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid investigation_id") from exc
+
+    investigation = await db.scalar(
+        select(Investigation).where(Investigation.id == inv_id, Investigation.organization_id == user.organization_id)
+    )
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
+
+    job_rows = list((await db.scalars(select(ScraperJob).where(ScraperJob.investigation_id == investigation.id))).all())
+    counts = {}
+    for job in job_rows:
+        counts[job.status] = counts.get(job.status, 0) + 1
+
+    total = len(job_rows)
+    completed = counts.get("COMPLETED", 0)
+    progress = 100 if total == 0 and investigation.status == "COMPLETED" else (round(completed / total * 100, 1) if total else 0)
+
+    return {
+        "investigation_id": str(investigation.id),
+        "status": investigation.status,
+        "depth": investigation.depth,
+        "progress_percent": progress,
+        "jobs": counts,
+        "job_total": total,
     }
