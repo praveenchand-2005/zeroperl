@@ -53,9 +53,15 @@ jobs:
       - name: Install dependencies
         working-directory: services/${{ matrix.service }}
         run: pip install -r requirements.txt pytest
+      - name: Install Playwright browsers
+        if: matrix.service == 'scraper'
+        working-directory: services/scraper
+        run: python -m playwright install --with-deps chromium
       - name: Compile Python
         working-directory: services/${{ matrix.service }}
         run: python -m compileall .
       - name: Run tests
         working-directory: services/${{ matrix.service }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest -q
