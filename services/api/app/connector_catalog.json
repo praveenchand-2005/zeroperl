@@ -1,0 +1,42 @@
+[
+  {
+    "source_id": "government-public",
+    "source_name": "Government Public Records",
+    "source_type": "GOVERNMENT_PUBLIC",
+    "access_method": "HTTP_OR_BROWSER",
+    "authorization_required": true,
+    "public_access_allowed": true,
+    "allowed_fields": ["name", "address", "city", "district", "state", "postal_code", "registration", "document_date", "public_contact"],
+    "enabled": false
+  },
+  {
+    "source_id": "regulatory-public",
+    "source_name": "Regulatory Public Records",
+    "source_type": "REGULATORY_PUBLIC",
+    "access_method": "HTTP_OR_BROWSER",
+    "authorization_required": true,
+    "public_access_allowed": true,
+    "allowed_fields": ["name", "organization", "registration", "role", "address", "document_date"],
+    "enabled": false
+  },
+  {
+    "source_id": "corporate-public",
+    "source_name": "Corporate Public Records",
+    "source_type": "CORPORATE_PUBLIC",
+    "access_method": "HTTP_OR_BROWSER",
+    "authorization_required": true,
+    "public_access_allowed": true,
+    "allowed_fields": ["name", "company", "registration", "public_address", "public_contact", "role", "document_date"],
+    "enabled": false
+  },
+  {
+    "source_id": "public-web",
+    "source_name": "Targeted Public Web",
+    "source_type": "PUBLIC_WEB",
+    "access_method": "HTTP_OR_BROWSER",
+    "authorization_required": true,
+    "public_access_allowed": true,
+    "allowed_fields": ["name", "address", "city", "district", "state", "postal_code", "public_contact", "public_company", "public_position"],
+    "enabled": false
+  }
+]
