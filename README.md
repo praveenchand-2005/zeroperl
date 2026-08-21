@@ -1,11 +1,18 @@
 # Recovery Intelligence Platform
 
-Enterprise SaaS architecture for authorized loan-recovery organizations. This repository is the GitHub home for the V1-V4 build.
+GitHub-native implementation of the V1–V4 Recovery Intelligence SaaS.
 
-## Versions
-- V1: Recovery operations and case management
-- V2: Advanced authorized/public web data acquisition and evidence engine
-- V3: Government/public-record and public-web intelligence
-- V4: Public professional/social profile, employment and company intelligence
+## Current implementation
 
-All investigation and data-access functionality must enforce authorization, source policy, tenant isolation, provenance, audit logging, and human review for consequential decisions.
+- **V1:** multi-tenant recovery case foundation, authentication/RBAC, case management, audit, field/recovery architecture.
+- **V2:** source registry, scoped scraping jobs, HTTP/browser acquisition, document parsing, evidence provenance, content hashing and background worker pipeline.
+- **V3:** public/government/regulatory intelligence primitives, connector planning, evidence graph, address/temporal analysis, contradiction detection and human review.
+- **V4:** public/professional profile candidates, employment records, company intelligence, organizational relationships and dedicated V4 API/UI.
+
+## Security boundary
+
+This platform is case-scoped and authorization-scoped. Public/authorized source acquisition must not bypass authentication, private access controls, CAPTCHAs, rate limits, or restricted systems. Public social/professional data is treated as evidence and must remain distinguishable from verified identity or employment facts.
+
+## Validation
+
+GitHub Actions CI is configured for the web, API, scraper and workers. The current GitHub integration is not reporting workflow runs yet, so CI status must be verified on GitHub before the branch is considered production-ready.
