@@ -10,13 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import get_current_user
 from .db import get_db
 from .models import Case, Company, EmploymentRecord, OrganizationRelationship, Profile, User
-from .v4_intelligence import ProfileCandidate, profile_match_score, relationship_requires_review, same_company
+from .v4_intelligence import ProfileCandidate, profile_match_score, relationship_requires_review
 
 router = APIRouter(prefix="/api/v4", tags=["v4-intelligence"])
 
 
 class ProfileCreate(BaseModel):
-    case_id: UUID
     platform: str = Field(min_length=2, max_length=80)
     profile_url: str
     username: str | None = None
@@ -28,7 +27,6 @@ class ProfileCreate(BaseModel):
 
 
 class CompanyCreate(BaseModel):
-    case_id: UUID
     legal_name: str = Field(min_length=2, max_length=300)
     trade_name: str | None = None
     registration_number: str | None = None
@@ -40,23 +38,21 @@ class CompanyCreate(BaseModel):
 
 
 class EmploymentCreate(BaseModel):
-    case_id: UUID
     profile_id: UUID | None = None
     company_id: UUID | None = None
     job_title: str | None = None
     status: str = "CURRENT_CANDIDATE"
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence_id: UUID | None = None
 
 
 class RelationshipCreate(BaseModel):
-    case_id: UUID
     company_id: UUID | None = None
     source_entity_id: UUID | None = None
     target_entity_id: UUID | None = None
     relationship_type: str
     evidence_id: UUID | None = None
-    confidence: float = 0.0
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 async def authorized_case(case_id: UUID, user: User, db: AsyncSession) -> Case:
@@ -75,10 +71,22 @@ async def list_profiles(case_id: UUID, user: User = Depends(get_current_user), d
 
 @router.post("/cases/{case_id}/profiles", status_code=201)
 async def create_profile(case_id: UUID, payload: ProfileCreate, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    await authorized_case(case_id, user, db)
+    case = await authorized_case(case_id, user, db)
     candidate = ProfileCandidate(payload.platform, payload.profile_url, payload.display_name, payload.public_location, payload.public_company, payload.public_position)
-    score = profile_match_score((await db.scalar(select(Case.borrower_name).where(Case.id == case_id))).__str__(), None, candidate)
-    profile = Profile(organization_id=user.organization_id, case_id=case_id, platform=payload.platform, profile_url=payload.profile_url, username=payload.username, display_name=payload.display_name, public_location=payload.public_location, public_company=payload.public_company, public_position=payload.public_position, headline=payload.headline, confidence=score * 100)
+    score = profile_match_score(case.borrower_name, None, candidate)
+    profile = Profile(
+        organization_id=user.organization_id,
+        case_id=case_id,
+        platform=payload.platform,
+        profile_url=payload.profile_url,
+        username=payload.username,
+        display_name=payload.display_name,
+        public_location=payload.public_location,
+        public_company=payload.public_company,
+        public_position=payload.public_position,
+        headline=payload.headline,
+        confidence=score * 100,
+    )
     db.add(profile)
     await db.commit()
     await db.refresh(profile)
@@ -116,6 +124,7 @@ async def create_employment(case_id: UUID, payload: EmploymentCreate, user: User
     record = EmploymentRecord(organization_id=user.organization_id, case_id=case_id, profile_id=payload.profile_id, company_id=payload.company_id, job_title=payload.job_title, status=payload.status, confidence=payload.confidence, source_evidence_id=payload.evidence_id)
     db.add(record)
     await db.commit()
+    await db.refresh(record)
     return {"employment_id": str(record.id), "status": record.status, "confidence": record.confidence}
 
 
@@ -134,4 +143,5 @@ async def create_relationship(case_id: UUID, payload: RelationshipCreate, user: 
     relationship = OrganizationRelationship(organization_id=user.organization_id, case_id=case_id, company_id=payload.company_id, source_entity_id=payload.source_entity_id, target_entity_id=payload.target_entity_id, relationship_type=payload.relationship_type, evidence_id=payload.evidence_id, confidence=payload.confidence, verification_status="UNVERIFIED")
     db.add(relationship)
     await db.commit()
+    await db.refresh(relationship)
     return {"relationship_id": str(relationship.id), "relationship_type": relationship.relationship_type, "confidence": relationship.confidence}
