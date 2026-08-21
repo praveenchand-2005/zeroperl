@@ -1,0 +1,108 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE TABLE IF NOT EXISTS organizations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS users (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (organization_id, email)
+);
+
+CREATE TABLE IF NOT EXISTS cases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  case_number TEXT NOT NULL,
+  lender_name TEXT,
+  loan_reference_masked TEXT,
+  borrower_name TEXT NOT NULL,
+  dpd INTEGER,
+  outstanding_amount NUMERIC(18,2),
+  priority TEXT NOT NULL DEFAULT 'MEDIUM',
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  assigned_user_id UUID REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (organization_id, case_number)
+);
+
+CREATE TABLE IF NOT EXISTS investigations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  case_id UUID NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  requested_by UUID REFERENCES users(id),
+  depth TEXT NOT NULL DEFAULT 'STANDARD',
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  identity_score NUMERIC(5,2),
+  address_score NUMERIC(5,2),
+  contact_score NUMERIC(5,2),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS addresses (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  raw_address TEXT NOT NULL,
+  normalized_address TEXT,
+  city TEXT,
+  district TEXT,
+  state TEXT,
+  postal_code TEXT,
+  country TEXT,
+  latitude DOUBLE PRECISION,
+  longitude DOUBLE PRECISION,
+  verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+  confidence NUMERIC(5,2),
+  first_seen TIMESTAMPTZ,
+  last_seen TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS evidence (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  case_id UUID REFERENCES cases(id) ON DELETE CASCADE,
+  investigation_id UUID REFERENCES investigations(id) ON DELETE CASCADE,
+  source_name TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  source_reference TEXT,
+  source_url TEXT,
+  entity_type TEXT,
+  field_name TEXT,
+  raw_value TEXT,
+  normalized_value TEXT,
+  observed_at TIMESTAMPTZ,
+  retrieved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  verification_status TEXT NOT NULL DEFAULT 'UNVERIFIED',
+  confidence NUMERIC(5,2),
+  content_hash TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id),
+  case_id UUID REFERENCES cases(id),
+  action TEXT NOT NULL,
+  reason TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cases_org_status ON cases(organization_id, status);
+CREATE INDEX IF NOT EXISTS idx_investigations_case ON investigations(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_evidence_case ON evidence(case_id, retrieved_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_case ON audit_logs(case_id, created_at DESC);
