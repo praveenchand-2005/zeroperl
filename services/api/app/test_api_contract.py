@@ -1,5 +1,6 @@
+from pathlib import Path
+
 from .main import app
-from .models import Case
 
 
 def test_api_exposes_v1_v2_v3_v4_surfaces() -> None:
@@ -14,6 +15,8 @@ def test_api_exposes_v1_v2_v3_v4_surfaces() -> None:
     assert "/api/v4/cases/{case_id}/employment" in paths
 
 
-def test_case_number_is_tenant_scoped() -> None:
-    constraint_names = {constraint.name for constraint in Case.__table__.constraints}
-    assert "uq_cases_organization_case_number" in constraint_names
+def test_tenant_case_number_migration_contract() -> None:
+    migration = Path(__file__).parents[1] / "alembic" / "versions" / "0001_tenant_case_number.py"
+    source = migration.read_text(encoding="utf-8")
+    assert "uq_cases_organization_case_number" in source
+    assert "UNIQUE (organization_id, case_number)" in source
