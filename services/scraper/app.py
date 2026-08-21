@@ -4,12 +4,13 @@ import hashlib
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from selectolax.parser import HTMLParser
 
-app = FastAPI(title="Recovery Intelligence Scraper", version="0.1.0")
+from fetchers import fetch_browser, fetch_http
+from parsers import build_provenance, parse_document
+
+app = FastAPI(title="Recovery Intelligence Scraper", version="0.2.0")
 
 
 class SourcePolicy(BaseModel):
@@ -17,18 +18,22 @@ class SourcePolicy(BaseModel):
     allowed_domains: list[str] = Field(default_factory=list)
     max_requests_per_minute: int = 30
     allow_public_web: bool = True
+    browser_allowed: bool = False
 
 
 class FetchRequest(BaseModel):
     case_id: str
+    investigation_id: str
     source: SourcePolicy
     url: str
     fields: list[str] = Field(default_factory=list)
+    use_browser: bool = False
 
 
 class Evidence(BaseModel):
     evidence_id: str
     case_id: str
+    investigation_id: str
     source_id: str
     source_url: str
     retrieved_at: datetime
@@ -37,6 +42,8 @@ class Evidence(BaseModel):
     text: str
     extracted_fields: dict[str, str | None] = Field(default_factory=dict)
     verification_status: str = "UNVERIFIED"
+    extraction_method: str
+    provenance: dict[str, str]
 
 
 def allowed_url(url: str, policy: SourcePolicy) -> bool:
@@ -49,52 +56,46 @@ def allowed_url(url: str, policy: SourcePolicy) -> bool:
     return any(hostname == domain.lower() or hostname.endswith("." + domain.lower()) for domain in policy.allowed_domains)
 
 
-def extract_text(html: str) -> tuple[str | None, str]:
-    tree = HTMLParser(html)
-    title_node = tree.css_first("title")
-    title = title_node.text(strip=True) if title_node else None
-    for node in tree.css("script, style, noscript"):
-        node.decompose()
-    text = tree.body.text(separator=" ", strip=True) if tree.body else tree.text(separator=" ", strip=True)
-    return title, text
-
-
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0"}
 
 
 @app.post("/v2/fetch", response_model=Evidence)
-async def fetch_public_page(request: FetchRequest) -> Evidence:
+async def fetch_source(request: FetchRequest) -> Evidence:
     if not allowed_url(request.url, request.source):
         raise HTTPException(status_code=403, detail="Source/domain is not permitted by policy")
+    if request.use_browser and not request.source.browser_allowed:
+        raise HTTPException(status_code=403, detail="Browser access is disabled for this source policy")
 
-    async with httpx.AsyncClient(
-        follow_redirects=True,
-        timeout=httpx.Timeout(20.0),
-        headers={"User-Agent": "RecoveryIntelligence/0.1 (+authorized-case-investigation)"},
-    ) as client:
-        response = await client.get(request.url)
-        if response.status_code == 429:
-            raise HTTPException(status_code=429, detail="Source rate limit reached")
-        response.raise_for_status()
+    try:
+        result = await (
+            fetch_browser(request.url, request.source.allowed_domains)
+            if request.use_browser
+            else fetch_http(request.url, request.source.allowed_domains)
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Source fetch failed: {exc}") from exc
 
-    if "text/html" not in response.headers.get("content-type", ""):
-        raise HTTPException(status_code=415, detail="Only HTML is supported by this fetcher")
-
-    title, text = extract_text(response.text)
+    title, text, extracted_fields, extraction_method = parse_document(result.body, result.content_type)
+    content_hash = hashlib.sha256(result.body).hexdigest()
     evidence_id = hashlib.sha256(
-        f"{request.case_id}|{request.source.source_id}|{request.url}|{response.text}".encode("utf-8")
+        f"{request.case_id}|{request.investigation_id}|{request.source.source_id}|{result.final_url}|{content_hash}".encode("utf-8")
     ).hexdigest()
-    content_hash = hashlib.sha256(response.text.encode("utf-8")).hexdigest()
 
     return Evidence(
         evidence_id=evidence_id,
         case_id=request.case_id,
+        investigation_id=request.investigation_id,
         source_id=request.source.source_id,
-        source_url=str(response.url),
+        source_url=result.final_url,
         retrieved_at=datetime.now(timezone.utc),
         content_hash=content_hash,
         title=title,
-        text=text[:200_000],
+        text=text,
+        extracted_fields=extracted_fields,
+        extraction_method=extraction_method,
+        provenance=build_provenance(result.final_url, content_hash, extraction_method),
     )
