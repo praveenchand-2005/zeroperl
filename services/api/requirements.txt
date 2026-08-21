@@ -9,3 +9,5 @@ python-multipart
 PyJWT
 pwdlib[argon2]
 email-validator
+httpx
+pytest-asyncio
