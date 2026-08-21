@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import get_current_user
 from .db import get_db
-from .models import Case, ScraperJob, SourceRegistry, User
+from .models import Case, Investigation, ScraperJob, SourceRegistry, User
 from .source_execution import build_connector_plan
 
 router = APIRouter(prefix="/api/v3/execution", tags=["v3-execution"])
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/v3/execution", tags=["v3-execution"])
 
 class ExecutionRequest(BaseModel):
     case_id: UUID
+    investigation_id: UUID
     source_id: str = Field(min_length=2)
     urls: list[str] = Field(default_factory=list)
     fields: list[str] = Field(default_factory=list)
@@ -31,6 +32,16 @@ async def plan_execution(
     case = await db.scalar(select(Case).where(Case.id == payload.case_id, Case.organization_id == user.organization_id))
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    investigation = await db.scalar(
+        select(Investigation).where(
+            Investigation.id == payload.investigation_id,
+            Investigation.case_id == case.id,
+            Investigation.organization_id == user.organization_id,
+        )
+    )
+    if not investigation:
+        raise HTTPException(status_code=404, detail="Investigation not found")
 
     source = await db.scalar(
         select(SourceRegistry).where(
@@ -57,13 +68,15 @@ async def plan_execution(
     for plan in plans:
         job = ScraperJob(
             organization_id=user.organization_id,
-            investigation_id=UUID("00000000-0000-0000-0000-000000000001"),
+            investigation_id=investigation.id,
             source_registry_id=source.id,
             job_type="PUBLIC_FETCH",
             status="QUEUED",
             requested_url=plan.url,
             requested_fields=list(plan.fields),
         )
+        db.add(job)
         jobs.append({"url": plan.url, "fields": list(plan.fields), "source_id": plan.source_id})
 
-    return {"source_id": source.source_id, "job_count": len(jobs), "jobs": jobs}
+    await db.commit()
+    return {"source_id": source.source_id, "investigation_id": str(investigation.id), "job_count": len(jobs), "jobs": jobs}
