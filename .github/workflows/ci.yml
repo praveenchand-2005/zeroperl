@@ -98,6 +98,22 @@ jobs:
         run: pip install -r requirements.txt pytest
       - name: Compile Python
         run: python -m compileall .
+      - name: Initialize test database schema
+        env:
+          DATABASE_URL: postgresql+asyncpg://recovery:recovery@127.0.0.1:5432/recovery_intelligence
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          import asyncio
+          from app.db import engine
+          from app.models import Base
+
+          async def main() -> None:
+              async with engine.begin() as connection:
+                  await connection.run_sync(Base.metadata.create_all)
+
+          asyncio.run(main())
+          PY
       - name: Run unit and integration tests
         env:
           DATABASE_URL: postgresql+asyncpg://recovery:recovery@127.0.0.1:5432/recovery_intelligence
