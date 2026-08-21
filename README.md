@@ -13,6 +13,6 @@ GitHub-native implementation of the V1–V4 Recovery Intelligence SaaS.
 
 This platform is case-scoped and authorization-scoped. Public/authorized source acquisition must not bypass authentication, private access controls, CAPTCHAs, rate limits, or restricted systems. Public social/professional data is treated as evidence and must remain distinguishable from verified identity or employment facts.
 
-## Validation
+## Validation status
 
-GitHub Actions CI is configured for the web, API, scraper and workers. The current GitHub integration is not reporting workflow runs yet, so CI status must be verified on GitHub before the branch is considered production-ready.
+GitHub Actions CI is configured for the web, API, scraper and workers. At the moment GitHub is returning no workflow run/status for the current branch, so the repository is **not yet considered CI-verified or production-ready**. The branch is being stabilized with import/integration tests and static integration checks until Actions execution is available.
