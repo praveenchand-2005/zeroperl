@@ -6,3 +6,6 @@ sqlalchemy[asyncio]
 asyncpg
 alembic
 python-multipart
+PyJWT
+pwdlib[argon2]
+email-validator
