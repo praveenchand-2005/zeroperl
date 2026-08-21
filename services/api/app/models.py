@@ -48,7 +48,7 @@ class Case(Base):
 class Investigation(Base):
     __tablename__ = "investigations"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
     requested_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     depth: Mapped[str] = mapped_column(String(20), nullable=False, default="STANDARD")
@@ -162,6 +162,78 @@ class ReviewQueue(Base):
     resolution: Mapped[str | None] = mapped_column(Text)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Profile(Base):
+    __tablename__ = "profiles"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    platform: Mapped[str] = mapped_column(String(80), nullable=False)
+    profile_url: Mapped[str] = mapped_column(Text, nullable=False)
+    username: Mapped[str | None] = mapped_column(String(200))
+    display_name: Mapped[str | None] = mapped_column(String(200))
+    headline: Mapped[str | None] = mapped_column(Text)
+    public_location: Mapped[str | None] = mapped_column(String(200))
+    public_company: Mapped[str | None] = mapped_column(String(250))
+    public_position: Mapped[str | None] = mapped_column(String(250))
+    public_website: Mapped[str | None] = mapped_column(Text)
+    first_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[float | None]
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False, default="UNVERIFIED")
+    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class Company(Base):
+    __tablename__ = "companies"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    legal_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    trade_name: Mapped[str | None] = mapped_column(String(300))
+    registration_number: Mapped[str | None] = mapped_column(String(200))
+    country: Mapped[str | None] = mapped_column(String(100))
+    state: Mapped[str | None] = mapped_column(String(100))
+    city: Mapped[str | None] = mapped_column(String(100))
+    website: Mapped[str | None] = mapped_column(Text)
+    industry: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(50), default="UNKNOWN")
+    confidence: Mapped[float | None]
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False, default="UNVERIFIED")
+    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class EmploymentRecord(Base):
+    __tablename__ = "employment_records"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"))
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"))
+    job_title: Mapped[str | None] = mapped_column(String(250))
+    start_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(50), default="CURRENT_CANDIDATE")
+    source_evidence_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("evidence.id", ondelete="SET NULL"))
+    confidence: Mapped[float | None]
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False, default="UNVERIFIED")
+    metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+
+class OrganizationRelationship(Base):
+    __tablename__ = "organization_relationships"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("cases.id", ondelete="CASCADE"), index=True)
+    company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"))
+    source_entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    target_entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    relationship_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    evidence_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("evidence.id", ondelete="SET NULL"))
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confidence: Mapped[float | None]
+    verification_status: Mapped[str] = mapped_column(String(40), nullable=False, default="UNVERIFIED")
 
 
 class AuditLog(Base):
