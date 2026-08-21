@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [api, scraper]
+        service: [api, scraper, workers]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
