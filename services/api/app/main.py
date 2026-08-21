@@ -9,8 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .db import engine, get_db
 from .models import AuditLog, Base, Case, Evidence, Investigation, Organization, ScraperJob, SourceRegistry, User
+from .source_registry_api import router as source_registry_router
+from .v3_records_api import router as v3_records_router
 
-app = FastAPI(title="Recovery Intelligence API", version="0.3.0")
+app = FastAPI(title="Recovery Intelligence API", version="0.4.0")
+app.include_router(source_registry_router)
+app.include_router(v3_records_router)
 
 
 class HealthResponse(BaseModel):
@@ -114,7 +118,7 @@ async def startup() -> None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", version="0.3.0")
+    return HealthResponse(status="ok", version="0.4.0")
 
 
 @app.post("/api/v1/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
