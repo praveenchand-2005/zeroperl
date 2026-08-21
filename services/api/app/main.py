@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -8,12 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth import create_access_token, get_current_user, hash_password, require_roles, verify_password
 from .db import engine, get_db
-from .models import AuditLog, Base, Case, Evidence, Investigation, Organization, ScraperJob, SourceRegistry, User
+from .models import AuditLog, Base, Case, Evidence, EvidenceEdge, EvidenceNode, Investigation, Organization, ReviewQueue, ScraperJob, SourceRegistry, User
 from .source_registry_api import router as source_registry_router
 from .v3_records_api import router as v3_records_router
 from .v3_routes import router as v3_intelligence_router
 
-app = FastAPI(title="Recovery Intelligence API", version="0.5.0")
+app = FastAPI(title="Recovery Intelligence API", version="0.6.0")
 app.include_router(source_registry_router)
 app.include_router(v3_records_router)
 app.include_router(v3_intelligence_router)
@@ -112,6 +112,22 @@ class EvidenceResponse(BaseModel):
     retrieved_at: datetime
 
 
+class ReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    review_type: str
+    status: str
+    reason: str
+    payload: dict
+    resolution: str | None
+    created_at: datetime
+
+
+class ReviewDecision(BaseModel):
+    resolution: str = Field(min_length=2, max_length=100)
+    status: str = Field(default="RESOLVED", pattern=r"^(RESOLVED|REJECTED|NEEDS_MORE_EVIDENCE)$")
+
+
 @app.on_event("startup")
 async def startup() -> None:
     async with engine.begin() as conn:
@@ -120,7 +136,7 @@ async def startup() -> None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", version="0.5.0")
+    return HealthResponse(status="ok", version="0.6.0")
 
 
 @app.post("/api/v1/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -243,3 +259,34 @@ async def case_evidence(case_id: str, user: User = Depends(get_current_user), db
         raise HTTPException(status_code=404, detail="Case not found")
     rows = await db.scalars(select(Evidence).where(Evidence.organization_id == user.organization_id, Evidence.case_id == cid).order_by(Evidence.retrieved_at.desc()))
     return list(rows.all())
+
+
+@app.get("/api/v3/cases/{case_id}/review-queue", response_model=list[ReviewResponse])
+async def review_queue(case_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[ReviewResponse]:
+    try:
+        cid = UUID(case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid case_id") from exc
+    case = await db.scalar(select(Case).where(Case.id == cid, Case.organization_id == user.organization_id))
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+    rows = await db.scalars(select(ReviewQueue).where(ReviewQueue.organization_id == user.organization_id, ReviewQueue.case_id == cid, ReviewQueue.status == "PENDING").order_by(ReviewQueue.created_at.desc()))
+    return list(rows.all())
+
+
+@app.post("/api/v3/review-queue/{review_id}/decision", response_model=ReviewResponse)
+async def review_decision(review_id: str, decision: ReviewDecision, user: User = Depends(require_roles("organization_admin", "recovery_manager", "auditor")), db: AsyncSession = Depends(get_db)) -> ReviewResponse:
+    try:
+        rid = UUID(review_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid review_id") from exc
+    review = await db.scalar(select(ReviewQueue).where(ReviewQueue.id == rid, ReviewQueue.organization_id == user.organization_id))
+    if not review:
+        raise HTTPException(status_code=404, detail="Review item not found")
+    review.status = decision.status
+    review.resolution = decision.resolution
+    review.resolved_at = datetime.now(timezone.utc)
+    db.add(AuditLog(organization_id=user.organization_id, user_id=user.id, case_id=review.case_id, action="REVIEW_DECISION", details=f"review={review.id};status={decision.status}"))
+    await db.commit()
+    await db.refresh(review)
+    return ReviewResponse.model_validate(review)
