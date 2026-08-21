@@ -12,11 +12,13 @@ from .models import AuditLog, Base, Case, Evidence, EvidenceEdge, EvidenceNode, 
 from .source_registry_api import router as source_registry_router
 from .v3_records_api import router as v3_records_router
 from .v3_routes import router as v3_intelligence_router
+from .v3_execution_api import router as v3_execution_router
 
-app = FastAPI(title="Recovery Intelligence API", version="0.6.0")
+app = FastAPI(title="Recovery Intelligence API", version="0.7.0")
 app.include_router(source_registry_router)
 app.include_router(v3_records_router)
 app.include_router(v3_intelligence_router)
+app.include_router(v3_execution_router)
 
 
 class HealthResponse(BaseModel):
@@ -136,7 +138,7 @@ async def startup() -> None:
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", version="0.6.0")
+    return HealthResponse(status="ok", version="0.7.0")
 
 
 @app.post("/api/v1/auth/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
